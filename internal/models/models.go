@@ -86,6 +86,10 @@ type CommitResponse struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+type CommitCountResponse struct {
+	CommitCount int `json:"commit_count"`
+}
+
 type AuthorStatsResponse struct {
 	AuthorName   string    `json:"author_name"`
 	AuthorEmail  string    `json:"author_email"`

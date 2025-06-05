@@ -284,12 +284,12 @@ func (h *GitHubHandler) GetRepositoryStats(w http.ResponseWriter, r *http.Reques
 
 	// This would require extending the service to get repository stats
 	// For now, we'll return a placeholder response
-	statsData := models.RepositoryStatsResponse{
-		Name:     repo,
-		FullName: repositoryName,
-		// Other fields would be populated from the service
+	statsData, err := h.service.GetRepositoryStats(repositoryName)
+	if err != nil {
+		h.logger.Error("Failed to get repository stats", "error", err)
+		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get repository stats", err.Error())
+		return
 	}
-
 	response := models.SuccessResponse(
 		fmt.Sprintf("Statistics for repository %s retrieved successfully", repositoryName),
 		statsData,

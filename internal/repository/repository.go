@@ -271,3 +271,31 @@ func (r *Repository) GetAllRepositories(page, pageSize int) ([]models.Repository
 
 	return repositories, nil
 }
+
+func (r *Repository) GetCommitCountByRepository(repositoryID int) ([]models.CommitCountResponse, error) {
+	query := `
+        SELECT COUNT(*) as commit_count
+        FROM commits
+        where repository_id = $1`
+
+	rows, err := r.db.Query(query, repositoryID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get commits count by repository: %w", err)
+	}
+	defer rows.Close()
+
+	var commits []models.CommitCountResponse
+	for rows.Next() {
+		var commit models.CommitCountResponse
+		if err := rows.Scan(&commit.CommitCount); err != nil {
+			return nil, fmt.Errorf("failed to scan commit count: %w", err)
+		}
+		commits = append(commits, commit)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate rows: %w", err)
+	}
+
+	return commits, nil
+}

@@ -231,3 +231,29 @@ func (s *GitHubService) GetTopCommitAuthors(limit int) ([]models.CommitAuthorSta
 func (s *GitHubService) GetCommitsByRepository(repositoryName string, page, pageSize int) ([]models.Commit, error) {
 	return s.repository.GetCommitsByRepository(repositoryName, page, pageSize)
 }
+
+func (s *GitHubService) GetRepositoryStats(repositoryName string) (*models.RepositoryStatsResponse, error) {
+	repo, err := s.repository.GetRepositoryByFullName(repositoryName)
+	if err != nil {
+		return nil, err
+	}
+
+	commits, err := s.repository.GetCommitCountByRepository(repo.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &models.RepositoryStatsResponse{
+		Name:            repo.Name,
+		FullName:        repo.FullName,
+		Description:     *repo.Description,
+		Language:        *repo.Language,
+		StarsCount:      repo.StarsCount,
+		ForksCount:      repo.ForksCount,
+		OpenIssuesCount: repo.OpenIssuesCount,
+		WatchersCount:   repo.WatchersCount,
+		TotalCommits:    commits[0].CommitCount,
+		LastSyncedAt:    repo.LastSyncedAt,
+		CreatedAt:       repo.CreatedAt,
+		UpdatedAt:       repo.UpdatedAt,
+	}, nil
+}
