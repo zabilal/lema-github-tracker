@@ -17,6 +17,8 @@ help:
 install-tools:
 	@echo "Installing swag for Swagger documentation generation..."
 	go install github.com/swaggo/swag/cmd/swag@latest
+	@echo "Installing air for auto-reload..."
+	go install github.com/air-verse/air@latest
 	@echo "Installing other dependencies..."
 	go mod tidy
 	go mod download
@@ -64,7 +66,7 @@ docker-run:
 # Development server with auto-reload (requires air)
 dev:
 	@echo "Starting development server with auto-reload..."
-	@echo "Install air first: go install github.com/cosmtrek/air@latest"
+	@echo "Install air first: go install github.com/air-verse/air@latest"
 	air
 
 # Format code

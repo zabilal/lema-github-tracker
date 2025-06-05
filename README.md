@@ -241,12 +241,6 @@ go test ./tests/integration/... -v
 - Batch insert operations for commits
 - UNIQUE constraints prevent duplicate data
 
-### API Rate Limiting
-- GitHub API rate limiting: 5000 requests/hour (authenticated)
-- Pagination with configurable page size (default: 100)
-- Exponential backoff on rate limit errors
-- Graceful handling of API errors
-
 ### Memory Management
 - Streaming commit processing (no large in-memory collections)
 - Database connection reuse

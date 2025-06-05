@@ -145,7 +145,7 @@ func (r *Repository) GetTopCommitAuthors(limit int) ([]models.CommitAuthorStats,
 	query := `
         SELECT author_name, author_email, COUNT(*) as commit_count
         FROM commits
-        GROUP BY author_name
+        GROUP BY author_name, author_email
         ORDER BY commit_count DESC
         LIMIT $1`
 
@@ -158,7 +158,7 @@ func (r *Repository) GetTopCommitAuthors(limit int) ([]models.CommitAuthorStats,
 	var authors []models.CommitAuthorStats
 	for rows.Next() {
 		var author models.CommitAuthorStats
-		if err := rows.Scan(&author.AuthorName, &author.CommitCount); err != nil {
+		if err := rows.Scan(&author.AuthorName, &author.AuthorEmail, &author.CommitCount); err != nil {
 			return nil, fmt.Errorf("failed to scan author stats: %w", err)
 		}
 		authors = append(authors, author)

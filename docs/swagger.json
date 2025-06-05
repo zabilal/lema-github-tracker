@@ -6,7 +6,7 @@
     "swagger": "2.0",
     "info": {
         "description": "An API for managing GitHub repositories and analyzing commit data",
-        "title": "GitHub Service API",
+        "title": "Lema GitHub Service API",
         "termsOfService": "http://swagger.io/terms/",
         "contact": {
             "name": "API Support",

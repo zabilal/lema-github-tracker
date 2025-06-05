@@ -133,12 +133,12 @@ func TestRepository_GetTopCommitAuthors(t *testing.T) {
 
 	repo := repository.New(db)
 
-	rows := sqlmock.NewRows([]string{"author_name", "commit_count"}).
-		AddRow("John Doe", 100).
-		AddRow("Jane Smith", 75).
-		AddRow("Bob Wilson", 50)
+	rows := sqlmock.NewRows([]string{"author_name", "author_email", "commit_count"}).
+		AddRow("John Doe", "john.doe@example.com", 100).
+		AddRow("Jane Smith", "jane.smith@example.com", 75).
+		AddRow("Bob Wilson", "bob.wilson@example.com", 50)
 
-	mock.ExpectQuery("SELECT author_name, COUNT\\(\\*\\) as commit_count FROM commits GROUP BY author_name ORDER BY commit_count DESC LIMIT \\$1").
+	mock.ExpectQuery("SELECT author_name, author_email, COUNT\\(\\*\\) as commit_count FROM commits GROUP BY author_name, author_email ORDER BY commit_count DESC LIMIT \\$1").
 		WithArgs(3).
 		WillReturnRows(rows)
 
@@ -146,6 +146,7 @@ func TestRepository_GetTopCommitAuthors(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, authors, 3)
 	assert.Equal(t, "John Doe", authors[0].AuthorName)
+	assert.Equal(t, "john.doe@example.com", authors[0].AuthorEmail)
 	assert.Equal(t, 100, authors[0].CommitCount)
 
 	assert.NoError(t, mock.ExpectationsWereMet())

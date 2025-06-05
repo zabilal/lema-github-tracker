@@ -20,7 +20,7 @@ import (
 	"github-service/pkg/logger"
 )
 
-// @title GitHub Service API
+// @title Lema GitHub Service API
 // @version 1.0
 // @description An API for managing GitHub repositories and analyzing commit data
 // @termsOfService http://swagger.io/terms/

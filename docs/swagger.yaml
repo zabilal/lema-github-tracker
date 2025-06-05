@@ -139,7 +139,7 @@ info:
     name: MIT
     url: https://opensource.org/licenses/MIT
   termsOfService: http://swagger.io/terms/
-  title: GitHub Service API
+  title: Lema GitHub Service API
   version: "1.0"
 paths:
   /analytics/top-authors:
