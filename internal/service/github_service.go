@@ -168,30 +168,53 @@ func (s *GitHubService) fetchAndStoreCommits(ctx context.Context, owner, repoNam
 	return nil
 }
 
+// SyncAllRepositories syncs all repositories in batches to prevent memory issues
+// It processes repositories in pages of 50 items by default
 func (s *GitHubService) SyncAllRepositories(ctx context.Context) error {
-	repositories, err := s.repository.GetAllRepositories()
-	if err != nil {
-		return fmt.Errorf("failed to get all repositories: %w", err)
-	}
+	page := 1
+	pageSize := 50
 
-	for _, repo := range repositories {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+	for {
+		repositories, err := s.repository.GetAllRepositories(page, pageSize)
+		if err != nil {
+			return fmt.Errorf("failed to get repositories (page %d): %w", page, err)
 		}
 
-		parts := strings.Split(repo.FullName, "/")
-		if len(parts) != 2 {
-			s.logger.Error("Invalid repository full name", "full_name", repo.FullName)
-			continue
+		// If no more repositories, we're done
+		if len(repositories) == 0 {
+			break
 		}
 
-		owner, repoName := parts[0], parts[1]
-		if err := s.FetchAndStoreRepository(ctx, owner, repoName); err != nil {
-			s.logger.Error("Failed to sync repository", "repository", repo.FullName, "error", err)
-			continue
+		for _, repo := range repositories {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+				parts := strings.Split(repo.FullName, "/")
+				if len(parts) != 2 {
+					s.logger.Error("Invalid repository full name", "full_name", repo.FullName)
+					continue
+				}
+
+				owner, repoName := parts[0], parts[1]
+				s.logger.Info("Syncing repository", "repository", repo.FullName, "page", page)
+
+				if err := s.FetchAndStoreRepository(ctx, owner, repoName); err != nil {
+					s.logger.Error("Failed to sync repository",
+						"repository", repo.FullName,
+						"error", err,
+						"page", page)
+					continue
+				}
+			}
 		}
+
+		// If we got fewer items than the page size, this was the last page
+		if len(repositories) < pageSize {
+			break
+		}
+
+		page++
 	}
 
 	return nil
@@ -205,6 +228,6 @@ func (s *GitHubService) GetTopCommitAuthors(limit int) ([]models.CommitAuthorSta
 	return s.repository.GetTopCommitAuthors(limit)
 }
 
-func (s *GitHubService) GetCommitsByRepository(repositoryName string) ([]models.Commit, error) {
-	return s.repository.GetCommitsByRepository(repositoryName)
+func (s *GitHubService) GetCommitsByRepository(repositoryName string, page, pageSize int) ([]models.Commit, error) {
+	return s.repository.GetCommitsByRepository(repositoryName, page, pageSize)
 }

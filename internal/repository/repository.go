@@ -171,16 +171,32 @@ func (r *Repository) GetTopCommitAuthors(limit int) ([]models.CommitAuthorStats,
 	return authors, nil
 }
 
-func (r *Repository) GetCommitsByRepository(repositoryName string) ([]models.Commit, error) {
+// GetCommitsByRepository retrieves commits for a specific repository with pagination
+// page starts from 1, pageSize is the number of items per page
+func (r *Repository) GetCommitsByRepository(repositoryName string, page, pageSize int) ([]models.Commit, error) {
+	// Input validation
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 10 // Default page size
+	}
+	offset := (page - 1) * pageSize
+
+	// Optimized query with pagination and efficient JOIN
+	// Using a subquery to first get the repository ID, then joining with commits
 	query := `
+        WITH repo AS (
+            SELECT id FROM repositories WHERE full_name = $1 LIMIT 1
+        )
         SELECT c.id, c.repository_id, c.sha, c.message, c.author_name, 
                c.author_email, c.commit_date, c.url, c.created_at
         FROM commits c
-        JOIN repositories r ON c.repository_id = r.id
-        WHERE r.full_name = $1
-        ORDER BY c.commit_date DESC`
+        WHERE c.repository_id = (SELECT id FROM repo)
+        ORDER BY c.commit_date DESC
+        LIMIT $2 OFFSET $3`
 
-	rows, err := r.db.Query(query, repositoryName)
+	rows, err := r.db.Query(query, repositoryName, pageSize, offset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get commits by repository: %w", err)
 	}
@@ -206,18 +222,31 @@ func (r *Repository) GetCommitsByRepository(repositoryName string) ([]models.Com
 	return commits, nil
 }
 
-func (r *Repository) GetAllRepositories() ([]models.Repository, error) {
-	query := `
-        SELECT id, name, full_name, description, url, language, forks_count, 
-               stars_count, open_issues_count, watchers_count, created_at, 
-               updated_at, last_synced_at, last_commit_sha, sync_since,
-               created_at_db, updated_at_db
-        FROM repositories 
-        ORDER BY created_at_db`
+// GetAllRepositories retrieves a paginated list of all repositories
+// page starts from 1, pageSize is the number of items per page (max 100)
+func (r *Repository) GetAllRepositories(page, pageSize int) ([]models.Repository, error) {
+	// Input validation
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 50 // Default page size
+	}
+	offset := (page - 1) * pageSize
 
-	rows, err := r.db.Query(query)
+	// Only select necessary columns and use parameterized query for pagination
+	query := `
+        SELECT id, name, full_name, description, url, language, 
+               forks_count, stars_count, open_issues_count, watchers_count, 
+               created_at, updated_at, last_synced_at, last_commit_sha, 
+               sync_since, created_at_db, updated_at_db
+        FROM repositories 
+        ORDER BY created_at_db DESC
+        LIMIT $1 OFFSET $2`
+
+	rows, err := r.db.Query(query, pageSize, offset)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get all repositories: %w", err)
+		return nil, fmt.Errorf("failed to get repositories: %w", err)
 	}
 	defer rows.Close()
 

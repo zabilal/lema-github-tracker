@@ -180,9 +180,8 @@ func (h *GitHubHandler) GetCommitsByRepository(w http.ResponseWriter, r *http.Re
 
 	repositoryName := fmt.Sprintf("%s/%s", owner, repo)
 
-	// For now, we'll use the existing service method
 	// In a real implementation, the service need be extended to support pagination and filtering
-	commits, err := h.service.GetCommitsByRepository(repositoryName)
+	commits, err := h.service.GetCommitsByRepository(repositoryName, pagination.Page, pagination.PageSize)
 	if err != nil {
 		h.logger.Error("Failed to get commits by repository", "error", err, "repository", repositoryName)
 		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to get commits", err.Error())
