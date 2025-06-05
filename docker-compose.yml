@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  github-service:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_URL=postgres://github_user:github_pass@postgres:5432/github_service?sslmode=disable
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - SERVER_PORT=8080
+      - LOG_LEVEL=info
+      - SYNC_INTERVAL=6h
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    networks:
+      - github-network
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=github_service
+      - POSTGRES_USER=github_user
+      - POSTGRES_PASSWORD=github_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    networks:
+      - github-network
+
+  # Optional: Redis for caching (future enhancement)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    networks:
+      - github-network
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  github-network:
+    driver: bridge

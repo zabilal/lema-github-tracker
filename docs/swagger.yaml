@@ -1,0 +1,448 @@
+basePath: /api/v1
+definitions:
+  github-service_internal_models.APIResponse:
+    properties:
+      data: {}
+      error:
+        type: string
+      message:
+        type: string
+      success:
+        type: boolean
+    type: object
+  github-service_internal_models.AuthorStatsResponse:
+    properties:
+      author_email:
+        type: string
+      author_name:
+        type: string
+      commit_count:
+        type: integer
+      first_commit:
+        type: string
+      last_commit:
+        type: string
+      repositories:
+        items:
+          type: string
+        type: array
+    type: object
+  github-service_internal_models.CommitResponse:
+    properties:
+      author_email:
+        type: string
+      author_name:
+        type: string
+      commit_date:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: integer
+      message:
+        type: string
+      repository_id:
+        type: integer
+      sha:
+        type: string
+      url:
+        type: string
+    type: object
+  github-service_internal_models.HealthResponse:
+    properties:
+      status:
+        type: string
+      timestamp:
+        type: string
+      uptime:
+        type: string
+      version:
+        type: string
+    type: object
+  github-service_internal_models.RepositoryStatsResponse:
+    properties:
+      created_at:
+        type: string
+      description:
+        type: string
+      forks_count:
+        type: integer
+      full_name:
+        type: string
+      language:
+        type: string
+      last_commit_date:
+        type: string
+      last_synced_at:
+        type: string
+      name:
+        type: string
+      open_issues_count:
+        type: integer
+      stars_count:
+        type: integer
+      total_commits:
+        type: integer
+      updated_at:
+        type: string
+      watchers_count:
+        type: integer
+    type: object
+  github-service_internal_models.ResetSyncRequest:
+    properties:
+      full_name:
+        type: string
+      since:
+        type: string
+    required:
+    - full_name
+    - since
+    type: object
+  github-service_internal_models.SyncRepositoryRequest:
+    properties:
+      owner:
+        maxLength: 100
+        minLength: 1
+        type: string
+      repository:
+        maxLength: 100
+        minLength: 1
+        type: string
+    required:
+    - owner
+    - repository
+    type: object
+  github-service_internal_models.SyncResponse:
+    properties:
+      commits_added:
+        type: integer
+      repository_name:
+        type: string
+      synced_at:
+        type: string
+    type: object
+  github-service_internal_models.ValidationError:
+    properties:
+      field:
+        type: string
+      message:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@swagger.io
+    name: API Support
+    url: http://www.swagger.io/support
+  description: An API for managing GitHub repositories and analyzing commit data
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: http://swagger.io/terms/
+  title: GitHub Service API
+  version: "1.0"
+paths:
+  /analytics/top-authors:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve the top commit authors across all repositories
+      parameters:
+      - default: 10
+        description: 'Maximum number of authors to return (default: 10, max: 100)'
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Top authors retrieved successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/github-service_internal_models.APIResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/github-service_internal_models.AuthorStatsResponse'
+                  type: array
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            allOf:
+            - $ref: '#/definitions/github-service_internal_models.APIResponse'
+            - properties:
+                errors:
+                  items:
+                    $ref: '#/definitions/github-service_internal_models.ValidationError'
+                  type: array
+              type: object
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/github-service_internal_models.APIResponse'
+      summary: Get top commit authors
+      tags:
+      - Analytics
+  /health:
+    get:
+      consumes:
+      - application/json
+      description: Get the health status of the GitHub service
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Service is healthy
+          schema:
+            allOf:
+            - $ref: '#/definitions/github-service_internal_models.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github-service_internal_models.HealthResponse'
+              type: object
+      summary: Health check endpoint
+      tags:
+      - Health
+  /repositories/{owner}/{repo}/commits:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve commits for a specific repository with pagination and
+        filtering options
+      parameters:
+      - description: Repository owner
+        in: path
+        name: owner
+        required: true
+        type: string
+      - description: Repository name
+        in: path
+        name: repo
+        required: true
+        type: string
+      - default: 1
+        description: 'Page number (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: 'Page size (default: 20, max: 100)'
+        in: query
+        name: page_size
+        type: integer
+      - description: Filter by author name
+        in: query
+        name: author_name
+        type: string
+      - description: Filter by author email
+        in: query
+        name: author_email
+        type: string
+      - description: Filter by commit message (contains)
+        in: query
+        name: message
+        type: string
+      - description: Filter commits since date (RFC3339 format)
+        format: date-time
+        in: query
+        name: since
+        type: string
+      - description: Filter commits until date (RFC3339 format)
+        format: date-time
+        in: query
+        name: until
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Commits retrieved successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/github-service_internal_models.APIResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/github-service_internal_models.CommitResponse'
+                  type: array
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            allOf:
+            - $ref: '#/definitions/github-service_internal_models.APIResponse'
+            - properties:
+                errors:
+                  items:
+                    $ref: '#/definitions/github-service_internal_models.ValidationError'
+                  type: array
+              type: object
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/github-service_internal_models.APIResponse'
+      summary: Get commits by repository
+      tags:
+      - Repository
+  /repositories/{owner}/{repo}/stats:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve detailed statistics for a specific repository
+      parameters:
+      - description: Repository owner
+        in: path
+        name: owner
+        required: true
+        type: string
+      - description: Repository name
+        in: path
+        name: repo
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Repository statistics retrieved successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/github-service_internal_models.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github-service_internal_models.RepositoryStatsResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            allOf:
+            - $ref: '#/definitions/github-service_internal_models.APIResponse'
+            - properties:
+                errors:
+                  items:
+                    $ref: '#/definitions/github-service_internal_models.ValidationError'
+                  type: array
+              type: object
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/github-service_internal_models.APIResponse'
+      summary: Get repository statistics
+      tags:
+      - Repository
+  /repositories/reset-sync:
+    post:
+      consumes:
+      - application/json
+      description: Reset the synchronization state for a specific repository
+      parameters:
+      - description: Reset sync request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github-service_internal_models.ResetSyncRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Repository sync reset successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/github-service_internal_models.APIResponse'
+            - properties:
+                data:
+                  additionalProperties: true
+                  type: object
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            allOf:
+            - $ref: '#/definitions/github-service_internal_models.APIResponse'
+            - properties:
+                errors:
+                  items:
+                    $ref: '#/definitions/github-service_internal_models.ValidationError'
+                  type: array
+              type: object
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/github-service_internal_models.APIResponse'
+      summary: Reset repository sync
+      tags:
+      - Repository
+  /repositories/sync:
+    post:
+      consumes:
+      - application/json
+      description: Fetch and store repository data from GitHub
+      parameters:
+      - description: Repository sync request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github-service_internal_models.SyncRepositoryRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Repository synced successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/github-service_internal_models.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github-service_internal_models.SyncResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            allOf:
+            - $ref: '#/definitions/github-service_internal_models.APIResponse'
+            - properties:
+                errors:
+                  items:
+                    $ref: '#/definitions/github-service_internal_models.ValidationError'
+                  type: array
+              type: object
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/github-service_internal_models.APIResponse'
+      summary: Sync a specific repository
+      tags:
+      - Repository
+  /repositories/sync-all:
+    post:
+      consumes:
+      - application/json
+      description: Synchronize all repositories from the configured GitHub sources
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: All repositories synced successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/github-service_internal_models.APIResponse'
+            - properties:
+                data:
+                  additionalProperties: true
+                  type: object
+              type: object
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/github-service_internal_models.APIResponse'
+      summary: Sync all repositories
+      tags:
+      - Repository
+schemes:
+- http
+- https
+swagger: "2.0"
