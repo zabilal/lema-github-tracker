@@ -241,9 +241,9 @@ type Repository struct {
 	ID              int64      `json:"id"`
 	Name            string     `json:"name"`
 	FullName        string     `json:"full_name"`
-	Description     *string    `json:"description"`
+	Description     string     `json:"description"`
 	URL             string     `json:"url"`
-	Language        *string    `json:"language"`
+	Language        string     `json:"language"`
 	ForksCount      int        `json:"forks_count"`
 	StarsCount      int        `json:"stars_count"`
 	OpenIssuesCount int        `json:"open_issues_count"`

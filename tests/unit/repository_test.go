@@ -1,6 +1,7 @@
 package unit
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 	"time"
@@ -11,14 +12,16 @@ import (
 
 	"github-service/internal/models"
 	"github-service/internal/repository"
+	"github-service/pkg/logger"
 )
 
 func TestRepository_GetRepositoryByFullName(t *testing.T) {
 	db, mock, err := sqlmock.New()
+	logger := logger.New("Info")
 	require.NoError(t, err)
 	defer db.Close()
 
-	repo := repository.New(db)
+	repo := repository.New(db, logger)
 
 	t.Run("repository exists", func(t *testing.T) {
 		rows := sqlmock.NewRows([]string{
@@ -61,7 +64,9 @@ func TestRepository_CreateRepository(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	repo := repository.New(db)
+	logger := logger.New("debug")
+	repo := repository.New(db, logger)
+	txManager := repository.NewTransactionManager(db, logger)
 
 	testRepo := &models.Repository{
 		Name:            "test-repo",
@@ -78,28 +83,38 @@ func TestRepository_CreateRepository(t *testing.T) {
 		SyncSince:       time.Now(),
 	}
 
+	// Set up the mock expectations in the correct order
+	mock.ExpectBegin() // This should come before BeginTransaction
 	rows := sqlmock.NewRows([]string{"id", "created_at_db", "updated_at_db"}).
 		AddRow(1, time.Now(), time.Now())
-
 	mock.ExpectQuery("INSERT INTO repositories").
 		WithArgs(testRepo.Name, testRepo.FullName, testRepo.Description, testRepo.URL,
 			testRepo.Language, testRepo.ForksCount, testRepo.StarsCount, testRepo.OpenIssuesCount,
 			testRepo.WatchersCount, testRepo.CreatedAt, testRepo.UpdatedAt, testRepo.SyncSince).
 		WillReturnRows(rows)
 
-	err = repo.CreateRepository(testRepo)
+	// Start the transaction after setting up the expectations
+	ctx := context.Background()
+	tx, err := txManager.BeginTransaction(ctx, "test")
 	require.NoError(t, err)
-	assert.Equal(t, 1, testRepo.ID)
+	defer tx.Rollback()
 
+	// Now execute the test
+	err = repo.CreateRepository(tx, testRepo)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), testRepo.ID) // Changed from 1 to int64(1) to match the type
+
+	// Verify all expectations were met
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestRepository_CommitExists(t *testing.T) {
 	db, mock, err := sqlmock.New()
+	logger := logger.New("Info")
 	require.NoError(t, err)
 	defer db.Close()
 
-	repo := repository.New(db)
+	repo := repository.New(db, logger)
 
 	t.Run("commit exists", func(t *testing.T) {
 		rows := sqlmock.NewRows([]string{"count"}).AddRow(1)
@@ -128,10 +143,11 @@ func TestRepository_CommitExists(t *testing.T) {
 
 func TestRepository_GetTopCommitAuthors(t *testing.T) {
 	db, mock, err := sqlmock.New()
+	logger := logger.New("Info")
 	require.NoError(t, err)
 	defer db.Close()
 
-	repo := repository.New(db)
+	repo := repository.New(db, logger)
 
 	rows := sqlmock.NewRows([]string{"author_name", "author_email", "commit_count"}).
 		AddRow("John Doe", "john.doe@example.com", 100).

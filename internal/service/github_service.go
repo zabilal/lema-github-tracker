@@ -272,8 +272,8 @@ func (s *GitHubService) GetRepositoryStats(repositoryName string) (*models.Repos
 	return &models.RepositoryStatsResponse{
 		Name:            repo.Name,
 		FullName:        repo.FullName,
-		Description:     *repo.Description,
-		Language:        *repo.Language,
+		Description:     repo.Description,
+		Language:        repo.Language,
 		StarsCount:      repo.StarsCount,
 		ForksCount:      repo.ForksCount,
 		OpenIssuesCount: repo.OpenIssuesCount,

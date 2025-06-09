@@ -46,14 +46,12 @@ func (l *slogLogger) Info(msg string, args ...interface{}) {
 	l.logger.Info(msg, args...)
 }
 
-// Debug implements Logger.
 func (l *slogLogger) Debug(msg string, args ...interface{}) {
-	panic("unimplemented")
+	l.logger.Debug(msg, args...)
 }
 
-// Warn implements Logger.
 func (l *slogLogger) Warn(msg string, args ...interface{}) {
-	panic("unimplemented")
+	l.logger.Warn(msg, args...)
 }
 
 func (l *slogLogger) Error(msg string, args ...interface{}) {
