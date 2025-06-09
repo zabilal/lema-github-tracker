@@ -61,11 +61,20 @@ func main() {
 	// Initialize GitHub client
 	githubClient := github.NewClient(cfg.GitHubToken)
 
+	// Initialize Rate Limit Handler
+	rateLimitHandler := github.NewRateLimitHandler(cfg, logger)
+
 	// Initialize repository
-	repo := repository.New(db)
+	repo := repository.New(db, logger)
 
 	// Initialize service
-	githubService := service.NewGitHubService(githubClient, repo, logger)
+	githubService := service.NewGitHubService(
+		githubClient,
+		repo,
+		logger,
+		rateLimitHandler,
+		repository.NewTransactionManager(db, logger),
+	)
 
 	// Initialize scheduler
 	scheduler := scheduler.New(githubService, logger)
@@ -114,7 +123,13 @@ func main() {
 		seedCtx, seedCancel := context.WithTimeout(ctx, 10*time.Minute)
 		defer seedCancel()
 
-		if err := githubService.FetchAndStoreRepository(seedCtx, "chromium", "chromium"); err != nil {
+		tm := repository.NewTransactionManager(db, logger)
+
+		err := tm.WithTransaction(seedCtx, "seed_chromium_repository", func(tx repository.Transaction) error {
+			return githubService.FetchAndStoreRepository(seedCtx, tx, "chromium", "chromium")
+		})
+
+		if err != nil {
 			logger.Error("Failed to seed chromium data", "error", err)
 		} else {
 			logger.Info("Successfully seeded chromium data")
@@ -125,12 +140,6 @@ func main() {
 		"server_port", cfg.ServerPort,
 		"sync_interval", cfg.SyncInterval.String(),
 		"log_level", cfg.LogLevel)
-
-	// // Seed with chromium repository data
-	// logger.Info("Seeding with chromium repository data...")
-	// if err := githubService.FetchAndStoreRepository(ctx, "chromium", "chromium"); err != nil {
-	// 	logger.Error("Failed to seed chromium data", "error", err)
-	// }
 
 	// Wait for interrupt signal
 	sigChan := make(chan os.Signal, 1)

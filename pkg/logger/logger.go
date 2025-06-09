@@ -8,6 +8,8 @@ import (
 
 type Logger interface {
 	Info(msg string, args ...interface{})
+	Warn(msg string, args ...interface{})
+	Debug(msg string, args ...interface{})
 	Error(msg string, args ...interface{})
 	Fatal(msg string, args ...interface{})
 }
@@ -42,6 +44,16 @@ func New(level string) Logger {
 
 func (l *slogLogger) Info(msg string, args ...interface{}) {
 	l.logger.Info(msg, args...)
+}
+
+// Debug implements Logger.
+func (l *slogLogger) Debug(msg string, args ...interface{}) {
+	panic("unimplemented")
+}
+
+// Warn implements Logger.
+func (l *slogLogger) Warn(msg string, args ...interface{}) {
+	panic("unimplemented")
 }
 
 func (l *slogLogger) Error(msg string, args ...interface{}) {

@@ -6,14 +6,74 @@ import (
 	"time"
 
 	"github-service/internal/models"
+	"github-service/pkg/logger"
+
+	"github.com/pkg/errors"
 )
 
 type Repository struct {
-	db *sql.DB
+	db     *sql.DB
+	logger logger.Logger
 }
 
-func New(db *sql.DB) *Repository {
-	return &Repository{db: db}
+func New(db *sql.DB, logger logger.Logger) *Repository {
+	return &Repository{db: db, logger: logger}
+}
+
+func (r *Repository) UpdateRepositorySyncStatus(tx Transaction, id int64, status models.SyncStatus, syncedAt time.Time) error {
+	query := `
+		UPDATE repositories 
+		SET sync_status = $1, last_synced_at = $2, updated_at = $3
+		WHERE id = $4`
+
+	result, err := tx.Exec(query, status, syncedAt, time.Now(), id)
+	if err != nil {
+		return errors.Wrap(err, "failed to update repository sync status")
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return errors.Wrap(err, "failed to get rows affected")
+	}
+
+	if rowsAffected == 0 {
+		return errors.New("repository not found")
+	}
+
+	r.logger.Info("repository sync status updated",
+		"repository_id", id,
+		"status", status,
+		"synced_at", syncedAt)
+
+	return nil
+}
+
+func (r *Repository) GetRepositoryForUpdate(tx Transaction, owner, name string) (*models.Repository, error) {
+	query := `
+		SELECT id, owner, name, full_name, description, default_branch, 
+			   language, star_count, fork_count, issue_count, 
+			   last_synced_at, sync_since, created_at, updated_at
+		FROM repositories 
+		WHERE owner = $1 AND name = $2
+		FOR UPDATE`
+
+	var repo models.Repository
+	err := tx.QueryRow(query, owner, name).Scan(
+		&repo.ID, &repo.Name, &repo.FullName,
+		&repo.Description, &repo.Language,
+		&repo.StarsCount, &repo.ForksCount, &repo.OpenIssuesCount,
+		&repo.LastSyncedAt, &repo.SyncSince,
+		&repo.CreatedAt, &repo.UpdatedAt,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, errors.New("repository not found")
+		}
+		return nil, errors.Wrap(err, "failed to get repository for update")
+	}
+
+	return &repo, nil
 }
 
 func (r *Repository) GetRepositoryByFullName(fullName string) (*models.Repository, error) {
@@ -44,7 +104,7 @@ func (r *Repository) GetRepositoryByFullName(fullName string) (*models.Repositor
 	return &repo, nil
 }
 
-func (r *Repository) CreateRepository(repo *models.Repository) error {
+func (r *Repository) CreateRepository(tx Transaction, repo *models.Repository) error {
 	query := `
         INSERT INTO repositories (name, full_name, description, url, language, 
                                 forks_count, stars_count, open_issues_count, 
@@ -52,20 +112,24 @@ func (r *Repository) CreateRepository(repo *models.Repository) error {
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         RETURNING id, created_at_db, updated_at_db`
 
-	err := r.db.QueryRow(
+	err := tx.QueryRow(
 		query, repo.Name, repo.FullName, repo.Description, repo.URL,
 		repo.Language, repo.ForksCount, repo.StarsCount, repo.OpenIssuesCount,
 		repo.WatchersCount, repo.CreatedAt, repo.UpdatedAt, repo.SyncSince,
 	).Scan(&repo.ID, &repo.CreatedAtDB, &repo.UpdatedAtDB)
 
 	if err != nil {
-		return fmt.Errorf("failed to create repository: %w", err)
+		return errors.Wrap(err, "failed to create repository")
 	}
+
+	r.logger.Info("repository created",
+		"repository_id", repo.ID,
+		"full_name", repo.FullName)
 
 	return nil
 }
 
-func (r *Repository) UpdateRepository(repo *models.Repository) error {
+func (r *Repository) UpdateRepository(tx Transaction, repo *models.Repository) error {
 	query := `
         UPDATE repositories 
         SET name = $2, description = $3, url = $4, language = $5, 
@@ -83,6 +147,10 @@ func (r *Repository) UpdateRepository(repo *models.Repository) error {
 	if err != nil {
 		return fmt.Errorf("failed to update repository: %w", err)
 	}
+
+	r.logger.Info("repository updated",
+		"repository_id", repo.ID,
+		"full_name", repo.FullName)
 
 	return nil
 }
@@ -107,7 +175,7 @@ func (r *Repository) ResetRepositorySyncSince(fullName string, since time.Time) 
 	return nil
 }
 
-func (r *Repository) CommitExists(repositoryID int, sha string) (bool, error) {
+func (r *Repository) CommitExists(repositoryID int64, sha string) (bool, error) {
 	var count int
 	query := `SELECT COUNT(*) FROM commits WHERE repository_id = $1 AND sha = $2`
 	err := r.db.QueryRow(query, repositoryID, sha).Scan(&count)
@@ -272,7 +340,7 @@ func (r *Repository) GetAllRepositories(page, pageSize int) ([]models.Repository
 	return repositories, nil
 }
 
-func (r *Repository) GetCommitCountByRepository(repositoryID int) ([]models.CommitCountResponse, error) {
+func (r *Repository) GetCommitCountByRepository(repositoryID int64) ([]models.CommitCountResponse, error) {
 	query := `
         SELECT COUNT(*) as commit_count
         FROM commits

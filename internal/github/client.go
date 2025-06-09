@@ -1,60 +1,59 @@
 package github
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"time"
 
+	"github-service/internal/config"
 	"github-service/internal/models"
 )
 
 type Client struct {
 	httpClient *http.Client
-	token      string
 	baseURL    string
+	token      string
 }
 
 func NewClient(token string) *Client {
+	cfg, _ := config.Load()
 	return &Client{
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 		token:   token,
-		baseURL: "https://api.github.com",
+		baseURL: cfg.GitHubBaseUrl,
 	}
 }
 
-func (c *Client) GetRepository(owner, repo string) (*models.GitHubRepository, error) {
+func (c *Client) GetRepository(ctx context.Context, owner, repo string) (*http.Response, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s", c.baseURL, owner, repo)
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	if c.token != "" {
-		req.Header.Set("Authorization", "token "+c.token)
-	}
+	req.Header.Set("Authorization", "token "+c.token)
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %w", err)
-	}
-	defer resp.Body.Close()
+	return c.httpClient.Do(req)
+}
 
+func (c *Client) ParseRepositoryResponse(resp *http.Response) (*models.Repository, error) {
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("GitHub API error: %s", resp.Status)
 	}
 
-	var repository models.GitHubRepository
-	if err := json.NewDecoder(resp.Body).Decode(&repository); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+	var repo models.Repository
+	if err := json.NewDecoder(resp.Body).Decode(&repo); err != nil {
+		return nil, fmt.Errorf("failed to decode repository response: %w", err)
 	}
 
-	return &repository, nil
+	return &repo, nil
 }
 
 func (c *Client) GetCommits(owner, repo string, since time.Time, page, perPage int) ([]models.GitHubCommit, error) {

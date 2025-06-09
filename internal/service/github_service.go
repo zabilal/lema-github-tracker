@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -13,28 +14,54 @@ import (
 )
 
 type GitHubService struct {
-	githubClient *github.Client
-	repository   *repository.Repository
-	logger       logger.Logger
+	githubClient     *github.Client
+	repository       *repository.Repository
+	logger           logger.Logger
+	rateLimitHandler *github.RateLimitHandler
+	txManager        repository.TransactionManager
+	batchSize        int
+	maxRetries       int
+	retryDelay       time.Duration
 }
 
-func NewGitHubService(githubClient *github.Client, repo *repository.Repository, logger logger.Logger) *GitHubService {
+func NewGitHubService(
+	githubClient *github.Client,
+	repo *repository.Repository,
+	logger logger.Logger,
+	rateLimitHandler *github.RateLimitHandler,
+	txManager repository.TransactionManager,
+) *GitHubService {
 	return &GitHubService{
-		githubClient: githubClient,
-		repository:   repo,
-		logger:       logger,
+		githubClient:     githubClient,
+		repository:       repo,
+		logger:           logger,
+		rateLimitHandler: rateLimitHandler,
+		txManager:        txManager,
+
+		batchSize:  100,
+		maxRetries: 3,
+		retryDelay: time.Second * 2,
 	}
 }
 
-func (s *GitHubService) FetchAndStoreRepository(ctx context.Context, owner, repoName string) error {
+func (s *GitHubService) FetchAndStoreRepository(ctx context.Context, tx repository.Transaction, owner, repoName string) error {
 	fullName := fmt.Sprintf("%s/%s", owner, repoName)
 
 	s.logger.Info("Fetching repository", "repository", fullName)
 
 	// Fetch repository from GitHub
-	githubRepo, err := s.githubClient.GetRepository(owner, repoName)
+	resp, err := s.rateLimitHandler.RetryOperation(ctx, func() (*http.Response, error) {
+		return s.githubClient.GetRepository(ctx, owner, repoName)
+	})
 	if err != nil {
-		return fmt.Errorf("failed to fetch repository from GitHub: %w", err)
+		s.logger.Error("Failed to fetch repository %s: %v", fullName, err)
+		return err
+	}
+	defer resp.Body.Close()
+
+	githubRepo, err := s.githubClient.ParseRepositoryResponse(resp)
+	if err != nil {
+		return fmt.Errorf("failed to parse repository response: %w", err)
 	}
 
 	// Check if repository exists in database
@@ -50,10 +77,10 @@ func (s *GitHubService) FetchAndStoreRepository(ctx context.Context, owner, repo
 			Name:            githubRepo.Name,
 			FullName:        githubRepo.FullName,
 			Description:     githubRepo.Description,
-			URL:             githubRepo.HTMLURL,
+			URL:             githubRepo.URL,
 			Language:        githubRepo.Language,
 			ForksCount:      githubRepo.ForksCount,
-			StarsCount:      githubRepo.StargazersCount,
+			StarsCount:      githubRepo.StarsCount,
 			OpenIssuesCount: githubRepo.OpenIssuesCount,
 			WatchersCount:   githubRepo.WatchersCount,
 			CreatedAt:       githubRepo.CreatedAt,
@@ -61,7 +88,7 @@ func (s *GitHubService) FetchAndStoreRepository(ctx context.Context, owner, repo
 			SyncSince:       time.Now().AddDate(0, 0, -30), // Default to 30 days ago
 		}
 
-		if err := s.repository.CreateRepository(dbRepo); err != nil {
+		if err := s.repository.CreateRepository(tx, dbRepo); err != nil {
 			return fmt.Errorf("failed to create repository: %w", err)
 		}
 		s.logger.Info("Created new repository", "repository", fullName, "id", dbRepo.ID)
@@ -70,29 +97,29 @@ func (s *GitHubService) FetchAndStoreRepository(ctx context.Context, owner, repo
 		dbRepo = existingRepo
 		dbRepo.Name = githubRepo.Name
 		dbRepo.Description = githubRepo.Description
-		dbRepo.URL = githubRepo.HTMLURL
+		dbRepo.URL = githubRepo.URL
 		dbRepo.Language = githubRepo.Language
 		dbRepo.ForksCount = githubRepo.ForksCount
-		dbRepo.StarsCount = githubRepo.StargazersCount
+		dbRepo.StarsCount = githubRepo.StarsCount
 		dbRepo.OpenIssuesCount = githubRepo.OpenIssuesCount
 		dbRepo.WatchersCount = githubRepo.WatchersCount
 		dbRepo.UpdatedAt = githubRepo.UpdatedAt
 
-		if err := s.repository.UpdateRepository(dbRepo); err != nil {
+		if err := s.repository.UpdateRepository(tx, dbRepo); err != nil {
 			return fmt.Errorf("failed to update repository: %w", err)
 		}
 		s.logger.Info("Updated existing repository", "repository", fullName, "id", dbRepo.ID)
 	}
 
 	// Fetch and store commits
-	if err := s.fetchAndStoreCommits(ctx, owner, repoName, dbRepo); err != nil {
+	if err := s.fetchAndStoreCommits(ctx, tx, owner, repoName, dbRepo); err != nil {
 		return fmt.Errorf("failed to fetch and store commits: %w", err)
 	}
 
 	return nil
 }
 
-func (s *GitHubService) fetchAndStoreCommits(ctx context.Context, owner, repoName string, repo *models.Repository) error {
+func (s *GitHubService) fetchAndStoreCommits(ctx context.Context, tx repository.Transaction, owner, repoName string, repo *models.Repository) error {
 	s.logger.Info("Fetching commits", "repository", repo.FullName, "since", repo.SyncSince)
 
 	page := 1
@@ -147,7 +174,7 @@ func (s *GitHubService) fetchAndStoreCommits(ctx context.Context, owner, repoNam
 			repo.LastCommitSHA = &commits[0].SHA
 			now := time.Now()
 			repo.LastSyncedAt = &now
-			if err := s.repository.UpdateRepository(repo); err != nil {
+			if err := s.repository.UpdateRepository(tx, repo); err != nil {
 				s.logger.Error("Failed to update repository last commit SHA", "error", err)
 			}
 		}
@@ -170,7 +197,7 @@ func (s *GitHubService) fetchAndStoreCommits(ctx context.Context, owner, repoNam
 
 // SyncAllRepositories syncs all repositories in batches to prevent memory issues
 // It processes repositories in pages of 50 items by default
-func (s *GitHubService) SyncAllRepositories(ctx context.Context) error {
+func (s *GitHubService) SyncAllRepositories(ctx context.Context, tx repository.Transaction) error {
 	page := 1
 	pageSize := 50
 
@@ -199,7 +226,7 @@ func (s *GitHubService) SyncAllRepositories(ctx context.Context) error {
 				owner, repoName := parts[0], parts[1]
 				s.logger.Info("Syncing repository", "repository", repo.FullName, "page", page)
 
-				if err := s.FetchAndStoreRepository(ctx, owner, repoName); err != nil {
+				if err := s.FetchAndStoreRepository(ctx, tx, owner, repoName); err != nil {
 					s.logger.Error("Failed to sync repository",
 						"repository", repo.FullName,
 						"error", err,

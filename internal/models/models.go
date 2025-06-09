@@ -3,6 +3,7 @@ package models
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -237,7 +238,7 @@ func (f *RepositoryFilter) Validate() error {
 }
 
 type Repository struct {
-	ID              int        `json:"id"`
+	ID              int64      `json:"id"`
 	Name            string     `json:"name"`
 	FullName        string     `json:"full_name"`
 	Description     *string    `json:"description"`
@@ -254,11 +255,12 @@ type Repository struct {
 	SyncSince       time.Time  `json:"sync_since"`
 	CreatedAtDB     time.Time  `json:"created_at_db"`
 	UpdatedAtDB     time.Time  `json:"updated_at_db"`
+	SyncStatus      SyncStatus `json:"sync_status"`
 }
 
 type Commit struct {
-	ID           int       `json:"id"`
-	RepositoryID int       `json:"repository_id"`
+	ID           int64     `json:"id"`
+	RepositoryID int64     `json:"repository_id"`
 	SHA          string    `json:"sha"`
 	Message      string    `json:"message"`
 	AuthorName   string    `json:"author_name"`
@@ -267,6 +269,22 @@ type Commit struct {
 	URL          string    `json:"url"`
 	CreatedAt    time.Time `json:"created_at"`
 }
+
+type CommitStats struct {
+	TotalCommits    int64     `json:"total_commits"`
+	UniqueAuthors   int64     `json:"unique_authors"`
+	LastCommitDate  time.Time `json:"last_commit_date"`
+	FirstCommitDate time.Time `json:"first_commit_date"`
+}
+
+type SyncStatus string
+
+const (
+	SyncStatusPending    SyncStatus = "pending"
+	SyncStatusInProgress SyncStatus = "in_progress"
+	SyncStatusCompleted  SyncStatus = "completed"
+	SyncStatusFailed     SyncStatus = "failed"
+)
 
 type CommitAuthorStats struct {
 	AuthorName  string `json:"author_name"`
@@ -305,4 +323,17 @@ type GitHubCommitAuthor struct {
 	Name  string    `json:"name"`
 	Email string    `json:"email"`
 	Date  time.Time `json:"date"`
+}
+
+type BatchOperation struct {
+	BatchSize int
+	Logger    *slog.Logger
+}
+
+type SyncStatusResponse struct {
+	Repository   *Repository  `json:"repository"`
+	CommitStats  *CommitStats `json:"commit_stats"`
+	SyncStatus   SyncStatus   `json:"sync_status"`
+	LastSyncedAt *time.Time   `json:"last_synced_at"`
+	SyncSince    *time.Time   `json:"sync_since"`
 }
