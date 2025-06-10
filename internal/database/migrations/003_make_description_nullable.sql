@@ -1,0 +1,3 @@
+ALTER TABLE repositories 
+ALTER COLUMN description DROP NOT NULL,
+ALTER COLUMN language DROP NOT NULL;
