@@ -1,6 +1,7 @@
 package unit
 
 import (
+	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -10,7 +11,21 @@ import (
 	"github-service/pkg/logger"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
+
+// MockClient is a mock implementation of the GitHub client for testing
+type MockClient struct {
+	mock.Mock
+}
+
+func (m *MockClient) GetRateLimit(ctx context.Context) (*github.RateLimitInfo, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*github.RateLimitInfo), args.Error(1)
+}
 
 func TestRateLimitHandler(t *testing.T) {
 	cfg := &config.Config{
@@ -21,7 +36,11 @@ func TestRateLimitHandler(t *testing.T) {
 	}
 
 	log := logger.New("debug")
-	handler := github.NewRateLimitHandler(cfg, log)
+	// Create a mock client
+	mockClient := new(MockClient)
+	
+	// Set up the handler with the mock client
+	handler := github.NewRateLimitHandler(cfg, log, mockClient)
 
 	t.Run("ExtractRateLimitInfo", func(t *testing.T) {
 		resp := &http.Response{

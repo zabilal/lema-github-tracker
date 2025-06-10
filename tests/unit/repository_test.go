@@ -71,9 +71,9 @@ func TestRepository_CreateRepository(t *testing.T) {
 	testRepo := &models.Repository{
 		Name:            "test-repo",
 		FullName:        "owner/test-repo",
-		Description:     stringPtr("Test repository"),
+		Description:     *stringPtr("Test repository"),
 		URL:             "https://github.com/owner/test-repo",
-		Language:        stringPtr("Go"),
+		Language:        *stringPtr("Go"),
 		ForksCount:      10,
 		StarsCount:      20,
 		OpenIssuesCount: 5,

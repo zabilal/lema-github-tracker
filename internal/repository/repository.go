@@ -175,35 +175,41 @@ func (r *Repository) ResetRepositorySyncSince(fullName string, since time.Time) 
 	return nil
 }
 
-func (r *Repository) CommitExists(repositoryID int64, sha string) (bool, error) {
+func (r *Repository) CommitExists(tx Transaction, repositoryID int64, sha string) (bool, error) {
 	var count int
-	query := `SELECT COUNT(*) FROM commits WHERE repository_id = $1 AND sha = $2`
-	err := r.db.QueryRow(query, repositoryID, sha).Scan(&count)
+	err := tx.QueryRow(
+		"SELECT COUNT(*) FROM commits WHERE repository_id = $1 AND sha = $2",
+		repositoryID, sha,
+	).Scan(&count)
+
 	if err != nil {
 		return false, fmt.Errorf("failed to check if commit exists: %w", err)
 	}
+
 	return count > 0, nil
 }
 
-func (r *Repository) CreateCommit(commit *models.Commit) error {
+func (r *Repository) CreateCommit(tx Transaction, commit *models.Commit) error {
 	query := `
-        INSERT INTO commits (repository_id, sha, message, author_name, 
-                           author_email, commit_date, url)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ON CONFLICT (repository_id, sha) DO NOTHING
-        RETURNING id, created_at`
+		INSERT INTO commits (repository_id, sha, message, author_name, author_email, commit_date, url, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		RETURNING id, created_at, updated_at`
 
-	err := r.db.QueryRow(
-		query, commit.RepositoryID, commit.SHA, commit.Message,
-		commit.AuthorName, commit.AuthorEmail, commit.CommitDate, commit.URL,
-	).Scan(&commit.ID, &commit.CreatedAt)
+	err := tx.QueryRow(
+		query,
+		commit.RepositoryID,
+		commit.SHA,
+		commit.Message,
+		commit.AuthorName,
+		commit.AuthorEmail,
+		commit.CommitDate,
+		commit.URL,
+		time.Now(),
+		time.Now(),
+	).Scan(&commit.ID, &commit.CreatedAt, &commit.UpdatedAt)
 
 	if err != nil {
-		// If no rows were returned due to conflict, that's okay
-		if err == sql.ErrNoRows {
-			return nil
-		}
-		return fmt.Errorf("failed to create commit: %w", err)
+		return errors.Wrap(err, "failed to create commit")
 	}
 
 	return nil

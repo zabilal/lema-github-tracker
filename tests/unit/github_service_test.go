@@ -3,6 +3,7 @@ package unit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -21,12 +22,6 @@ import (
 	"github-service/pkg/logger"
 )
 
-type GitHubClient interface {
-	GetRepository(ctx context.Context, owner, repo string) (*models.Repository, error)
-	GetCommits(ctx context.Context, owner, repo string, since, until *time.Time, page, perPage int) ([]*models.Commit, error)
-	
-}
-
 // MockGitHubClient is a mock implementation of the GitHub client
 type MockGitHubClient struct {
 	mock.Mock
@@ -40,12 +35,13 @@ func (m *MockGitHubClient) GetRepository(ctx context.Context, owner, repo string
 	return args.Get(0).(*models.Repository), args.Error(1)
 }
 
-func (m *MockGitHubClient) ListCommits(ctx context.Context, owner, repo string, since time.Time, page, perPage int) ([]*models.Commit, error) {
-	args := m.Called(ctx, owner, repo, since, page, perPage)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]*models.Commit), args.Error(1)
+
+func (m *MockGitHubClient) GetCommits(ctx context.Context, owner, repo string, since *time.Time, page, perPage int) ([]*models.GitHubCommit, error) {
+    args := m.Called(ctx, owner, repo, since, page, perPage)
+    if args.Get(0) == nil {
+        return nil, args.Error(1)
+    }
+    return args.Get(0).([]*models.GitHubCommit), args.Error(1)
 }
 
 func setupTestService(t *testing.T) (*service.GitHubService, *MockGitHubClient, sqlmock.Sqlmock, *repository.Repository, func()) {
@@ -136,7 +132,7 @@ func TestGitHubService_FetchAndStoreRepository_Success(t *testing.T) {
 	mockDB.ExpectCommit()
 
 	// Execute
-	err := svc.txManager.WithTransaction(ctx, "test_fetch_store", func(tx repository.Transaction) error {
+	err := svc.TxManager.WithTransaction(ctx, "test_fetch_store", func(tx repository.Transaction) error {
 		return svc.FetchAndStoreRepository(ctx, tx, owner, repoName)
 	})
 
@@ -156,10 +152,10 @@ func TestGitHubService_FetchAndStoreRepository_ErrorGettingRepo(t *testing.T) {
 
 	// Setup mock to return error
 	expectedErr := errors.New("failed to get repository")
-	mockClient.On("GetRepository", ctx, owner, repoName).Return((*github.Repository)(nil), expectedErr)
+	mockClient.On("GetRepository", ctx, owner, repoName).Return((*models.Repository)(nil), expectedErr)
 
 	// Execute
-	err := svc.txManager.WithTransaction(ctx, "test_error", func(tx repository.Transaction) error {
+	err := svc.TxManager.WithTransaction(ctx, "test_error", func(tx repository.Transaction) error {
 		return svc.FetchAndStoreRepository(ctx, tx, owner, repoName)
 	})
 
@@ -194,7 +190,7 @@ func TestGitHubService_FetchAndStoreRepository_ErrorListingCommits(t *testing.T)
 	mockDB.ExpectRollback()
 
 	// Execute
-	err := svc.txManager.WithTransaction(ctx, "test_commit_error", func(tx repository.Transaction) error {
+	err := svc.TxManager.WithTransaction(ctx, "test_commit_error", func(tx repository.Transaction) error {
 		return svc.FetchAndStoreRepository(ctx, tx, owner, repoName)
 	})
 
@@ -225,7 +221,7 @@ func TestGitHubService_FetchAndStoreRepository_RateLimitHandling(t *testing.T) {
 		Response: &http.Response{
 			StatusCode: http.StatusForbidden,
 			Header: http.Header{
-				"X-RateLimit-Reset": []string{string(time.Now().Add(time.Hour).Unix())},
+				"X-Ratelimit-Reset": []string{fmt.Sprintf("%d", time.Now().Add(time.Hour).Unix())},
 			},
 		},
 		Message: "API rate limit exceeded",
@@ -240,7 +236,7 @@ func TestGitHubService_FetchAndStoreRepository_RateLimitHandling(t *testing.T) {
 
 	// Execute
 	start := time.Now()
-	err := svc.txManager.WithTransaction(ctx, "test_rate_limit", func(tx repository.Transaction) error {
+	err := svc.TxManager.WithTransaction(ctx, "test_rate_limit", func(tx repository.Transaction) error {
 		return svc.FetchAndStoreRepository(ctx, tx, owner, repoName)
 	})
 	duration := time.Since(start)
@@ -292,7 +288,9 @@ func TestGitHubService_SyncAllRepositories(t *testing.T) {
 	}
 
 	// Execute
-	err := svc.SyncAllRepositories(ctx)
+	err := svc.TxManager.WithTransaction(ctx, "test_sync_all_repositories", func(tx repository.Transaction) error {
+		return svc.SyncAllRepositories(ctx, tx)
+	})	
 
 	// Verify
 	assert.NoError(t, err)

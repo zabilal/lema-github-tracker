@@ -100,13 +100,17 @@ definitions:
     type: object
   github-service_internal_models.SyncRepositoryRequest:
     properties:
+      force:
+        type: boolean
       owner:
-        maxLength: 100
+        maxLength: 50
         minLength: 1
         type: string
       repository:
         maxLength: 100
         minLength: 1
+        type: string
+      sync_since:
         type: string
     required:
     - owner

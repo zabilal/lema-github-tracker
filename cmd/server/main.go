@@ -62,7 +62,7 @@ func main() {
 	githubClient := github.NewClient(cfg.GitHubToken)
 
 	// Initialize Rate Limit Handler
-	rateLimitHandler := github.NewRateLimitHandler(cfg, logger)
+	rateLimitHandler := github.NewRateLimitHandler(cfg, logger, githubClient)
 
 	// Initialize repository
 	repo := repository.New(db, logger)
@@ -125,7 +125,7 @@ func main() {
 
 		tm := repository.NewTransactionManager(db, logger)
 
-		err := tm.WithTransaction(seedCtx, "seed_chromium_repository", func(tx repository.Transaction) error {
+		err := tm.WithTransactionTimeout(seedCtx, "seed_chromium_repository", 30*time.Minute, func(tx repository.Transaction) error {
 			return githubService.FetchAndStoreRepository(seedCtx, tx, "chromium", "chromium")
 		})
 

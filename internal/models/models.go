@@ -8,11 +8,6 @@ import (
 	"time"
 )
 
-type SyncRepositoryRequest struct {
-	Owner      string `json:"owner" validate:"required,min=1,max=100"`
-	Repository string `json:"repository" validate:"required,min=1,max=100"`
-}
-
 func (r *SyncRepositoryRequest) Validate() error {
 	if strings.TrimSpace(r.Owner) == "" {
 		return fmt.Errorf("owner is required")
@@ -241,7 +236,7 @@ type Repository struct {
 	ID              int64      `json:"id"`
 	Name            string     `json:"name"`
 	FullName        string     `json:"full_name"`
-	Description     string     `json:"description"`
+	Description     string     `json:"description,omitempty"`
 	URL             string     `json:"url"`
 	Language        string     `json:"language"`
 	ForksCount      int        `json:"forks_count"`
@@ -268,6 +263,7 @@ type Commit struct {
 	CommitDate   time.Time `json:"commit_date"`
 	URL          string    `json:"url"`
 	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type CommitStats struct {
@@ -336,4 +332,22 @@ type SyncStatusResponse struct {
 	SyncStatus   SyncStatus   `json:"sync_status"`
 	LastSyncedAt *time.Time   `json:"last_synced_at"`
 	SyncSince    *time.Time   `json:"sync_since"`
+}
+
+// SyncRepositoryRequest represents a repository sync request
+type SyncRepositoryRequest struct {
+	Owner      string     `json:"owner" validate:"required,min=1,max=50"`
+	Repository string     `json:"repository" validate:"required,min=1,max=100"`
+	SyncSince  *time.Time `json:"sync_since,omitempty"`
+	Force      bool       `json:"force,omitempty"`
+}
+
+// SyncRepositoryResponse represents the sync operation result
+type SyncRepositoryResponse struct {
+	Repository     *Repository `json:"repository"`
+	CommitsAdded   int                    `json:"commits_added"`
+	CommitsUpdated int                    `json:"commits_updated"`
+	CommitsDeleted int                    `json:"commits_deleted"`
+	SyncDuration   time.Duration          `json:"sync_duration"`
+	SyncedAt       time.Time              `json:"synced_at"`
 }

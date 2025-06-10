@@ -12,6 +12,12 @@ import (
 	"github-service/internal/models"
 )
 
+type GitHubClient interface {
+    GetRepository(ctx context.Context, owner, repo string) (*models.Repository, error)
+    GetCommits(ctx context.Context, owner, repo string, since *time.Time, page, perPage int) ([]*models.GitHubCommit, error)
+	ParseRepositoryResponse(resp *http.Response) (*models.Repository, error)
+}
+
 type Client struct {
 	httpClient *http.Client
 	baseURL    string
@@ -29,18 +35,33 @@ func NewClient(token string) *Client {
 	}
 }
 
-func (c *Client) GetRepository(ctx context.Context, owner, repo string) (*http.Response, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s", c.baseURL, owner, repo)
+func (c *Client) GetRepository(ctx context.Context, owner, repo string) (*models.Repository, error) {
+    url := fmt.Sprintf("%s/repos/%s/%s", c.baseURL, owner, repo)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
+    req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+    if err != nil {
+        return nil, fmt.Errorf("failed to create request: %w", err)
+    }
 
-	req.Header.Set("Authorization", "token "+c.token)
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
+    req.Header.Set("Authorization", "token "+c.token)
+    req.Header.Set("Accept", "application/vnd.github.v3+json")
 
-	return c.httpClient.Do(req)
+    resp, err := c.httpClient.Do(req)
+    if err != nil {
+        return nil, fmt.Errorf("failed to execute request: %w", err)
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode != http.StatusOK {
+        return nil, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+    }
+
+	var reponse models.Repository
+    if err := json.NewDecoder(resp.Body).Decode(&reponse); err != nil {
+        return nil, fmt.Errorf("failed to decode response: %w", err)
+    }
+
+    return &reponse, nil
 }
 
 func (c *Client) ParseRepositoryResponse(resp *http.Response) (*models.Repository, error) {
@@ -56,7 +77,8 @@ func (c *Client) ParseRepositoryResponse(resp *http.Response) (*models.Repositor
 	return &repo, nil
 }
 
-func (c *Client) GetCommits(owner, repo string, since time.Time, page, perPage int) ([]models.GitHubCommit, error) {
+func (c *Client) GetCommits(ctx context.Context, owner, repo string, since *time.Time, page, perPage int) ([]*models.GitHubCommit, error) {
+	
 	u, err := url.Parse(fmt.Sprintf("%s/repos/%s/%s/commits", c.baseURL, owner, repo))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse URL: %w", err)
@@ -88,7 +110,7 @@ func (c *Client) GetCommits(owner, repo string, since time.Time, page, perPage i
 		return nil, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
 	}
 
-	var commits []models.GitHubCommit
+	var commits []*models.GitHubCommit
 	if err := json.NewDecoder(resp.Body).Decode(&commits); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}

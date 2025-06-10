@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"github-service/internal/models"
+	"fmt"
 	"github-service/pkg/logger"
 	"time"
 
@@ -14,6 +14,8 @@ import (
 type Transaction struct {
 	tx        *sql.Tx
 	db        *sql.DB
+	committed bool
+	rolledBack bool
 	logger    logger.Logger
 	startTime time.Time
 	ctx       context.Context
@@ -207,34 +209,51 @@ func (t *Transaction) Prepare(query string) (*sql.Stmt, error) {
 
 // Commit commits the transaction
 func (t *Transaction) Commit() error {
-	if t.tx == nil {
-		return errors.New("transaction already closed")
-	}
-
-	err := t.tx.Commit()
-	if err != nil {
-		return errors.Wrap(err, "failed to commit transaction")
-	}
-
-	t.tx = nil // Mark as closed
-	return nil
+    if t.tx == nil {
+        return errors.New("no transaction to commit")
+    }
+    
+    if t.rolledBack {
+        return errors.New("cannot commit: transaction was rolled back")
+    }
+    
+    if t.committed {
+        return errors.New("transaction already committed")
+    }
+    
+    err := t.tx.Commit()
+    if err != nil {
+        return fmt.Errorf("failed to commit transaction: %w", err)
+    }
+    
+    t.committed = true
+    t.tx = nil
+    return nil
 }
 
 // Rollback rolls back the transaction
 func (t *Transaction) Rollback() error {
-	if t.tx == nil {
-		return nil // Already closed
-	}
-
-	err := t.tx.Rollback()
-	if err != nil {
-		return errors.Wrap(err, "failed to rollback transaction")
-	}
-
-	t.tx = nil // Mark as closed
-	return nil
+    if t.tx == nil {
+        return nil // No transaction to roll back
+    }
+    
+    if t.committed {
+        return nil // Already committed, nothing to roll back
+    }
+    
+    if t.rolledBack {
+        return nil // Already rolled back
+    }
+    
+    err := t.tx.Rollback()
+    if err != nil && err != sql.ErrTxDone {
+        return fmt.Errorf("failed to rollback transaction: %w", err)
+    }
+    
+    t.rolledBack = true
+    t.tx = nil
+    return nil
 }
-
 // Context returns the transaction context
 func (t *Transaction) Context() context.Context {
 	return t.ctx
@@ -253,28 +272,28 @@ func (t *Transaction) close() error {
 // Repository interfaces that support transactions
 
 // RepositoryTransactionRepo defines repository operations that can be performed within a transaction
-type RepositoryTransactionRepo interface {
-	// CreateRepository creates a new repository record within a transaction
-	CreateRepository(tx Transaction, repo *Repository) error
+// type RepositoryTransactionRepo interface {
+// 	// CreateRepository creates a new repository record within a transaction
+// 	CreateRepository(tx Transaction, repo *Repository) error
 
-	// UpdateRepository updates repository metadata within a transaction
-	UpdateRepository(tx Transaction, repo *Repository) error
+// 	// UpdateRepository updates repository metadata within a transaction
+// 	UpdateRepository(tx Transaction, repo *Repository) error
 
-	// UpdateRepositorySyncStatus updates sync status within a transaction
-	UpdateRepositorySyncStatus(tx Transaction, id int64, status models.SyncStatus, syncedAt time.Time) error
+// 	// UpdateRepositorySyncStatus updates sync status within a transaction
+// 	UpdateRepositorySyncStatus(tx Transaction, id int64, status models.SyncStatus, syncedAt time.Time) error
 
-	// GetRepositoryForUpdate gets repository with row lock for updates
-	GetRepositoryForUpdate(tx Transaction, owner, name string) (*Repository, error)
-}
+// 	// GetRepositoryForUpdate gets repository with row lock for updates
+// 	GetRepositoryForUpdate(tx Transaction, owner, name string) (*Repository, error)
+// }
 
 // CommitTransactionRepo defines commit operations that can be performed within a transaction
-type CommitTransactionRepo interface {
-	// BatchInsertCommits inserts multiple commits within a transaction
-	BatchInsertCommits(tx Transaction, commits []models.Commit) error
+// type CommitTransactionRepo interface {
+// 	// BatchInsertCommits inserts multiple commits within a transaction
+// 	BatchInsertCommits(tx Transaction, commits []models.Commit) error
 
-	// DeleteCommitsAfterDate deletes commits after a specific date within a transaction
-	DeleteCommitsAfterDate(tx Transaction, repositoryID int64, date time.Time) error
+// 	// DeleteCommitsAfterDate deletes commits after a specific date within a transaction
+// 	DeleteCommitsAfterDate(tx Transaction, repositoryID int64, date time.Time) error
 
-	// UpdateCommitStats updates commit statistics within a transaction
-	UpdateCommitStats(tx Transaction, repositoryID int64, stats models.CommitStats) error
-}
+// 	// UpdateCommitStats updates commit statistics within a transaction
+// 	UpdateCommitStats(tx Transaction, repositoryID int64, stats models.CommitStats) error
+// }

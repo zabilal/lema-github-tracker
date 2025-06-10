@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github-service/internal/models"
+	"github-service/internal/repository"
 	"github-service/internal/service"
 	"github-service/pkg/logger"
 
@@ -93,7 +94,10 @@ func (h *GitHubHandler) SyncRepository(w http.ResponseWriter, r *http.Request) {
 		"remote_addr", r.RemoteAddr)
 
 	startTime := time.Now()
-	if err := h.service.FetchAndStoreRepository(ctx, req.Owner, req.Repository); err != nil {
+	err := h.service.TxManager.WithTransaction(ctx, "sync_repository", func(tx repository.Transaction) error {
+		return h.service.FetchAndStoreRepository(ctx, tx, req.Owner, req.Repository)
+	})
+	if err != nil {
 		h.logger.Error("Failed to sync repository", "error", err)
 		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to sync repository", err.Error())
 		return
@@ -192,8 +196,8 @@ func (h *GitHubHandler) GetCommitsByRepository(w http.ResponseWriter, r *http.Re
 	commitResponses := make([]models.CommitResponse, len(commits))
 	for i, commit := range commits {
 		commitResponses[i] = models.CommitResponse{
-			ID:           commit.ID,
-			RepositoryID: commit.RepositoryID,
+			ID:           int(commit.ID),
+			RepositoryID: int(commit.RepositoryID),
 			SHA:          commit.SHA,
 			Message:      commit.Message,
 			AuthorName:   commit.AuthorName,
@@ -313,7 +317,11 @@ func (h *GitHubHandler) SyncAllRepositories(w http.ResponseWriter, r *http.Reque
 	h.logger.Info("Syncing all repositories via API", "remote_addr", r.RemoteAddr)
 
 	startTime := time.Now()
-	if err := h.service.SyncAllRepositories(ctx); err != nil {
+	err := h.service.TxManager.WithTransaction(ctx, "full_repository_sync", func(tx repository.Transaction) error {
+		err := h.service.SyncAllRepositories(ctx, tx)
+		return err
+	})
+	if err != nil {
 		h.logger.Error("Failed to sync all repositories", "error", err)
 		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to sync all repositories", err.Error())
 		return

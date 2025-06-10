@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -14,18 +13,18 @@ import (
 )
 
 type GitHubService struct {
-	githubClient     *github.Client
+	githubClient     github.GitHubClient
 	repository       *repository.Repository
 	logger           logger.Logger
 	rateLimitHandler *github.RateLimitHandler
-	txManager        repository.TransactionManager
+	TxManager        repository.TransactionManager
 	batchSize        int
 	maxRetries       int
 	retryDelay       time.Duration
 }
 
 func NewGitHubService(
-	githubClient *github.Client,
+	githubClient github.GitHubClient,
 	repo *repository.Repository,
 	logger logger.Logger,
 	rateLimitHandler *github.RateLimitHandler,
@@ -36,8 +35,7 @@ func NewGitHubService(
 		repository:       repo,
 		logger:           logger,
 		rateLimitHandler: rateLimitHandler,
-		txManager:        txManager,
-
+		TxManager:        txManager,
 		batchSize:  100,
 		maxRetries: 3,
 		retryDelay: time.Second * 2,
@@ -50,18 +48,16 @@ func (s *GitHubService) FetchAndStoreRepository(ctx context.Context, tx reposito
 	s.logger.Info("Fetching repository", "repository", fullName)
 
 	// Fetch repository from GitHub
-	resp, err := s.rateLimitHandler.RetryOperation(ctx, func() (*http.Response, error) {
-		return s.githubClient.GetRepository(ctx, owner, repoName)
-	})
-	if err != nil {
-		s.logger.Error("Failed to fetch repository %s: %v", fullName, err)
-		return err
-	}
-	defer resp.Body.Close()
+	var githubRepo *models.Repository
+    err := s.rateLimitHandler.RetryOperation(ctx, func() error {
+        var err error
+        githubRepo, err = s.githubClient.GetRepository(ctx, owner, repoName)
+        return err
+    })
 
-	githubRepo, err := s.githubClient.ParseRepositoryResponse(resp)
 	if err != nil {
-		return fmt.Errorf("failed to parse repository response: %w", err)
+		s.logger.Error("Failed to fetch repository", "repository", fullName, "error", err)
+		return fmt.Errorf("failed to fetch repository: %w", err)
 	}
 
 	// Check if repository exists in database
@@ -134,7 +130,7 @@ func (s *GitHubService) fetchAndStoreCommits(ctx context.Context, tx repository.
 		default:
 		}
 
-		commits, err := s.githubClient.GetCommits(owner, repoName, repo.SyncSince, page, perPage)
+		commits, err := s.githubClient.GetCommits(ctx, owner, repoName, &repo.SyncSince, page, perPage)
 		if err != nil {
 			return fmt.Errorf("failed to fetch commits from GitHub: %w", err)
 		}
@@ -145,7 +141,7 @@ func (s *GitHubService) fetchAndStoreCommits(ctx context.Context, tx repository.
 
 		for _, githubCommit := range commits {
 			// Check if commit already exists
-			exists, err := s.repository.CommitExists(repo.ID, githubCommit.SHA)
+			exists, err := s.repository.CommitExists(tx, repo.ID, githubCommit.SHA)
 			if err != nil {
 				return fmt.Errorf("failed to check if commit exists: %w", err)
 			}
@@ -161,7 +157,7 @@ func (s *GitHubService) fetchAndStoreCommits(ctx context.Context, tx repository.
 					URL:          githubCommit.HTMLURL,
 				}
 
-				if err := s.repository.CreateCommit(commit); err != nil {
+				if err := s.repository.CreateCommit(tx, commit); err != nil {
 					return fmt.Errorf("failed to create commit: %w", err)
 				}
 				newCommits++

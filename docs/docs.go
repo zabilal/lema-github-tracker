@@ -685,15 +685,21 @@ const docTemplate = `{
                 "repository"
             ],
             "properties": {
+                "force": {
+                    "type": "boolean"
+                },
                 "owner": {
                     "type": "string",
-                    "maxLength": 100,
+                    "maxLength": 50,
                     "minLength": 1
                 },
                 "repository": {
                     "type": "string",
                     "maxLength": 100,
                     "minLength": 1
+                },
+                "sync_since": {
+                    "type": "string"
                 }
             }
         },
