@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -35,34 +36,96 @@ func NewClient(token string) *Client {
 	}
 }
 
-func (c *Client) GetRepository(ctx context.Context, owner, repo string) (*models.Repository, error) {
-    url := fmt.Sprintf("%s/repos/%s/%s", c.baseURL, owner, repo)
+// get makes a GET request to the GitHub API
+func (c *Client) get(ctx context.Context, url string, result interface{}) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
 
-    req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-    if err != nil {
-        return nil, fmt.Errorf("failed to create request: %w", err)
-    }
+	// Set headers
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	if c.token != "" {
+		req.Header.Set("Authorization", "token "+c.token)
+	}
 
-    req.Header.Set("Authorization", "token "+c.token)
-    req.Header.Set("Accept", "application/vnd.github.v3+json")
+	// Make the request
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
 
-    resp, err := c.httpClient.Do(req)
-    if err != nil {
-        return nil, fmt.Errorf("failed to execute request: %w", err)
-    }
-    defer resp.Body.Close()
+	// Check for rate limit
+	if resp.StatusCode == http.StatusForbidden {
+		return &APIError{
+			StatusCode: resp.StatusCode,
+			Message:    "API rate limit exceeded",
+		}
+	}
 
-    if resp.StatusCode != http.StatusOK {
-        return nil, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
-    }
+	// Check for other errors
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return &APIError{
+			StatusCode: resp.StatusCode,
+			Message:    string(body),
+		}
+	}
 
-	var reponse models.Repository
-    if err := json.NewDecoder(resp.Body).Decode(&reponse); err != nil {
-        return nil, fmt.Errorf("failed to decode response: %w", err)
-    }
+	// Decode the response
+	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+		return fmt.Errorf("failed to decode response: %w", err)
+	}
 
-    return &reponse, nil
+	return nil
 }
+
+
+// GetRepository gets a repository from GitHub
+func (c *Client) GetRepository(ctx context.Context, owner, repo string) (*models.Repository, error) {
+	url := fmt.Sprintf("%s/repos/%s/%s", c.baseURL, owner, repo)
+	
+	var result models.Repository
+	err := c.get(ctx, url, &result)
+	if err != nil {
+		return nil, err
+	}
+	
+	return &result, nil
+}
+
+
+// func (c *Client) GetRepository(ctx context.Context, owner, repo string) (*models.Repository, error) {
+//     url := fmt.Sprintf("%s/repos/%s/%s", c.baseURL, owner, repo)
+
+//     req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+//     if err != nil {
+//         return nil, fmt.Errorf("failed to create request: %w", err)
+//     }
+
+//     req.Header.Set("Authorization", "token "+c.token)
+//     req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+//     resp, err := c.httpClient.Do(req)
+//     if err != nil {
+//         return nil, fmt.Errorf("failed to execute request: %w", err)
+//     }
+//     defer resp.Body.Close()
+
+//     if resp.StatusCode != http.StatusOK {
+//         return nil, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+//     }
+
+// 	fmt.Println(&resp.Body)
+// 	var reponse models.Repository
+//     if err := json.NewDecoder(resp.Body).Decode(&reponse); err != nil {
+//         return nil, fmt.Errorf("failed to decode response: %w", err)
+//     }
+
+
+//     return &reponse, nil
+// }
 
 func (c *Client) ParseRepositoryResponse(resp *http.Response) (*models.Repository, error) {
 	if resp.StatusCode != http.StatusOK {
@@ -116,4 +179,14 @@ func (c *Client) GetCommits(ctx context.Context, owner, repo string, since *time
 	}
 
 	return commits, nil
+}
+
+// APIError represents an error from the GitHub API
+type APIError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("GitHub API error: %d %s", e.StatusCode, e.Message)
 }

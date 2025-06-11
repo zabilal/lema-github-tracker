@@ -27,6 +27,16 @@ type Config struct {
 	GitHubRetryBaseDelay  time.Duration
 	GitHubRetryMaxDelay   time.Duration
 	GitHubRateLimitBuffer time.Duration
+
+
+	// Worker Configuration
+	WorkerCount int	
+
+	// Batch Configuration
+	BatchSize int
+	MaxRetries int
+	RetryDelay time.Duration
+	RateLimitThreshold float64
 }
 
 func Load() (*Config, error) {
@@ -49,6 +59,13 @@ func Load() (*Config, error) {
 		GitHubRetryBaseDelay:  getDurationEnv("GITHUB_RETRY_BASE_DELAY", 1*time.Second),
 		GitHubRetryMaxDelay:   getDurationEnv("GITHUB_RETRY_MAX_DELAY", 5*time.Minute),
 		GitHubRateLimitBuffer: getDurationEnv("GITHUB_RATE_LIMIT_BUFFER", 5*time.Minute),
+
+		WorkerCount: getIntEnv("WORKER_COUNT", 10),
+		BatchSize: getIntEnv("BATCH_SIZE", 10),
+		MaxRetries: getIntEnv("MAX_RETRIES", 3),
+		RetryDelay: getDurationEnv("RETRY_DELAY", 2*time.Second),
+		RateLimitThreshold: getFloatEnv("RATE_LIMIT_THRESHOLD", 0.8),
+		
 	}
 
 	// Parse start date
@@ -60,6 +77,15 @@ func Load() (*Config, error) {
 	cfg.StartDate = startDate
 
 	return cfg, nil
+}
+
+func getFloatEnv(key string, f float64) float64{
+	if value := os.Getenv(key); value != "" {
+		if i, err := strconv.ParseFloat(value, 64); err == nil {
+			return i
+		}
+	}
+	return f
 }
 
 func getEnv(key, defaultValue string) string {

@@ -2,14 +2,18 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github-service/internal/github"
 	"github-service/internal/models"
 	"github-service/internal/repository"
+	"github-service/internal/workers"
 	"github-service/pkg/logger"
+	"github-service/pkg/utils"
 )
 
 type GitHubService struct {
@@ -21,6 +25,8 @@ type GitHubService struct {
 	batchSize        int
 	maxRetries       int
 	retryDelay       time.Duration
+	workerPool       *workers.Pool
+
 }
 
 func NewGitHubService(
@@ -29,6 +35,7 @@ func NewGitHubService(
 	logger logger.Logger,
 	rateLimitHandler *github.RateLimitHandler,
 	txManager repository.TransactionManager,
+	workerCount int,
 ) *GitHubService {
 	return &GitHubService{
 		githubClient:     githubClient,
@@ -39,7 +46,54 @@ func NewGitHubService(
 		batchSize:  100,
 		maxRetries: 3,
 		retryDelay: time.Second * 2,
+		workerPool: workers.NewPool(workerCount),
 	}
+}
+
+// SyncRepository syncs a repository with GitHub
+func (s *GitHubService) SyncRepository(ctx context.Context, tx repository.Transaction, owner, repoName string) error {
+	// Use the rate limit handler for GitHub API calls
+	err := s.rateLimitHandler.RetryOperation(ctx, func() error {
+		return s.FetchAndStoreRepository(ctx, tx, owner, repoName)
+	})
+	
+	if err != nil {
+		return fmt.Errorf("failed to sync repository: %w", err)
+	}
+	
+	return nil
+}
+
+// syncRepositoryWithRetry syncs a repository with retry logic
+func (s *GitHubService) syncRepositoryWithRetry(ctx context.Context, tx repository.Transaction, owner, repoName string) error {
+	// Use the generic retry utility for non-GitHub operations
+	return utils.WithBackoff(ctx, utils.Config{
+		MaxRetries: s.maxRetries,
+		MinDelay:   s.retryDelay,
+		MaxDelay:   30 * time.Second,
+		ShouldRetry: func(err error) bool {
+			// Don't retry context cancellations
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return false
+			}
+			
+			// Retry on any other error
+			return true
+		},
+	}, func() error {
+		// Actual sync logic here
+		_, err := s.githubClient.GetRepository(ctx, owner, repoName)
+		if err != nil {
+			return fmt.Errorf("failed to get repository: %w", err)
+		}
+
+		// Save the repository to the database
+		// if err := s.repository.SaveRepository(ctx, tx, repo); err != nil {
+		// 	return fmt.Errorf("failed to save repository: %w", err)
+		// }
+
+		return nil
+	})
 }
 
 func (s *GitHubService) FetchAndStoreRepository(ctx context.Context, tx repository.Transaction, owner, repoName string) error {
@@ -191,57 +245,111 @@ func (s *GitHubService) fetchAndStoreCommits(ctx context.Context, tx repository.
 	return nil
 }
 
-// SyncAllRepositories syncs all repositories in batches to prevent memory issues
-// It processes repositories in pages of 50 items by default
-func (s *GitHubService) SyncAllRepositories(ctx context.Context, tx repository.Transaction) error {
-	page := 1
-	pageSize := 50
-
-	for {
-		repositories, err := s.repository.GetAllRepositories(page, pageSize)
-		if err != nil {
-			return fmt.Errorf("failed to get repositories (page %d): %w", page, err)
-		}
-
-		// If no more repositories, we're done
-		if len(repositories) == 0 {
-			break
-		}
-
-		for _, repo := range repositories {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-				parts := strings.Split(repo.FullName, "/")
-				if len(parts) != 2 {
-					s.logger.Error("Invalid repository full name", "full_name", repo.FullName)
-					continue
-				}
-
-				owner, repoName := parts[0], parts[1]
-				s.logger.Info("Syncing repository", "repository", repo.FullName, "page", page)
-
-				if err := s.FetchAndStoreRepository(ctx, tx, owner, repoName); err != nil {
-					s.logger.Error("Failed to sync repository",
-						"repository", repo.FullName,
-						"error", err,
-						"page", page)
-					continue
-				}
-			}
-		}
-
-		// If we got fewer items than the page size, this was the last page
-		if len(repositories) < pageSize {
-			break
-		}
-
-		page++
+// SyncAllRepositories processes all repositories concurrently
+func (s *GitHubService) SyncAllRepositories(ctx context.Context) error {
+	// Get all repositories to sync
+	repos, err := s.repository.GetAllRepositories(1, s.batchSize)
+	if err != nil {
+		return fmt.Errorf("failed to fetch all repositories: %w", err)
 	}
 
+	// Create a wait group for batch processing
+	var wg sync.WaitGroup
+	semaphore := make(chan struct{}, s.batchSize) // Limit concurrent operations
+
+	for _, repo := range repos {
+		wg.Add(1)
+		semaphore <- struct{}{} // Acquire semaphore
+
+		parts := strings.Split(repo.FullName, "/")
+		if len(parts) != 2 {
+			s.logger.Error("Invalid repository full name", "full_name", repo.FullName)
+			continue
+		}
+
+		owner, repoName := parts[0], parts[1]	
+
+		go func(r models.Repository) {
+			defer wg.Done()
+			defer func() { <-semaphore }() // Release semaphore
+
+			// Check rate limits before starting
+			if err := s.rateLimitHandler.WaitIfNeeded(ctx); err != nil {
+				s.logger.Error("Rate limit wait failed", "error", err)
+				return
+			}
+
+			// Process repository
+			err := s.TxManager.WithTransaction(ctx, "sync_repository", func(tx repository.Transaction) error {
+				return s.SyncRepository(ctx, tx, owner, repoName)
+			})
+
+			if err != nil {
+				s.logger.Error("Failed to sync repository",
+					"owner", owner,
+					"repo", repoName,
+					"error", err,
+				)
+			}
+		}(repo)
+	}
+
+	// Wait for all repositories to be processed
+	wg.Wait()
 	return nil
 }
+
+// SyncAllRepositories syncs all repositories in batches to prevent memory issues
+// It processes repositories in pages of 50 items by default
+// func (s *GitHubService) SyncAllRepositories(ctx context.Context, tx repository.Transaction) error {
+// 	page := 1
+// 	pageSize := 50
+
+// 	for {
+// 		repositories, err := s.repository.GetAllRepositories(page, pageSize)
+// 		if err != nil {
+// 			return fmt.Errorf("failed to get repositories (page %d): %w", page, err)
+// 		}
+
+// 		// If no more repositories, we're done
+// 		if len(repositories) == 0 {
+// 			break
+// 		}
+
+// 		for _, repo := range repositories {
+// 			select {
+// 			case <-ctx.Done():
+// 				return ctx.Err()
+// 			default:
+// 				parts := strings.Split(repo.FullName, "/")
+// 				if len(parts) != 2 {
+// 					s.logger.Error("Invalid repository full name", "full_name", repo.FullName)
+// 					continue
+// 				}
+
+// 				owner, repoName := parts[0], parts[1]
+// 				s.logger.Info("Syncing repository", "repository", repo.FullName, "page", page)
+
+// 				if err := s.FetchAndStoreRepository(ctx, tx, owner, repoName); err != nil {
+// 					s.logger.Error("Failed to sync repository",
+// 						"repository", repo.FullName,
+// 						"error", err,
+// 						"page", page)
+// 					continue
+// 				}
+// 			}
+// 		}
+
+// 		// If we got fewer items than the page size, this was the last page
+// 		if len(repositories) < pageSize {
+// 			break
+// 		}
+
+// 		page++
+// 	}
+
+// 	return nil
+// }
 
 func (s *GitHubService) ResetRepositorySync(fullName string, since time.Time) error {
 	return s.repository.ResetRepositorySyncSince(fullName, since)
@@ -268,7 +376,7 @@ func (s *GitHubService) GetRepositoryStats(repositoryName string) (*models.Repos
 	return &models.RepositoryStatsResponse{
 		Name:            repo.Name,
 		FullName:        repo.FullName,
-		Description:     repo.Description,
+		Description:     *repo.Description,
 		Language:        repo.Language,
 		StarsCount:      repo.StarsCount,
 		ForksCount:      repo.ForksCount,

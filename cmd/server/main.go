@@ -74,10 +74,11 @@ func main() {
 		logger,
 		rateLimitHandler,
 		repository.NewTransactionManager(db, logger),
+		cfg.WorkerCount,
 	)
 
 	// Initialize scheduler
-	scheduler := scheduler.New(githubService, logger)
+	scheduler := scheduler.NewScheduler(githubService, logger)
 
 	// // Start scheduler
 	// ctx, cancel := context.WithCancel(context.Background())

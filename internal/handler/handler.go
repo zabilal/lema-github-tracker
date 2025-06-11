@@ -11,6 +11,7 @@ import (
 	"github-service/internal/models"
 	"github-service/internal/repository"
 	"github-service/internal/service"
+	"github-service/pkg/errors"
 	"github-service/pkg/logger"
 
 	"github.com/gorilla/mux"
@@ -59,7 +60,7 @@ func (h *GitHubHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := models.SuccessResponse("GitHub Service is healthy", healthData)
-	h.writeJSONResponse(w, http.StatusOK, response)
+	h.WriteJSON(w, http.StatusOK, response)
 }
 
 // SyncRepository godoc
@@ -81,7 +82,7 @@ func (h *GitHubHandler) SyncRepository(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := req.Validate(); err != nil {
-		h.writeValidationError(w, "Validation failed", err.Error())
+		h.HandleError(w, r, errors.New(errors.ErrorTypeValidation, "Validation failed"))
 		return
 	}
 
@@ -95,7 +96,8 @@ func (h *GitHubHandler) SyncRepository(w http.ResponseWriter, r *http.Request) {
 
 	startTime := time.Now()
 	err := h.service.TxManager.WithTransaction(ctx, "sync_repository", func(tx repository.Transaction) error {
-		return h.service.FetchAndStoreRepository(ctx, tx, req.Owner, req.Repository)
+		// return h.service.FetchAndStoreRepository(ctx, tx, req.Owner, req.Repository)
+		return h.service.SyncRepository(ctx, tx, req.Owner, req.Repository)
 	})
 	if err != nil {
 		h.logger.Error("Failed to sync repository", "error", err)
@@ -317,10 +319,10 @@ func (h *GitHubHandler) SyncAllRepositories(w http.ResponseWriter, r *http.Reque
 	h.logger.Info("Syncing all repositories via API", "remote_addr", r.RemoteAddr)
 
 	startTime := time.Now()
-	err := h.service.TxManager.WithTransaction(ctx, "full_repository_sync", func(tx repository.Transaction) error {
-		err := h.service.SyncAllRepositories(ctx, tx)
-		return err
-	})
+	// err := h.service.TxManager.WithTransaction(ctx, "full_repository_sync", func(tx repository.Transaction) error {
+	err := h.service.SyncAllRepositories(ctx)
+	// return err
+	// })
 	if err != nil {
 		h.logger.Error("Failed to sync all repositories", "error", err)
 		h.writeErrorResponse(w, http.StatusInternalServerError, "Failed to sync all repositories", err.Error())

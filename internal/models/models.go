@@ -236,7 +236,7 @@ type Repository struct {
 	ID              int64      `json:"id"`
 	Name            string     `json:"name"`
 	FullName        string     `json:"full_name"`
-	Description     string     `json:"description,omitempty"`
+	Description     *string     `json:"description,omitempty"`
 	URL             string     `json:"url"`
 	Language        string     `json:"language"`
 	ForksCount      int        `json:"forks_count"`
