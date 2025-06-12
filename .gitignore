@@ -32,7 +32,6 @@ yarn-debug.log*
 yarn-error.log*
 
 # Environments
-.env
 .venv
 env/
 venv/
@@ -42,7 +41,6 @@ venv.bak/
 
 # IDE
 .idea/
-.vscode/
 *.swp
 *.swo
 .DS_Store
@@ -63,7 +61,7 @@ htmlcov/
 .ipynb_checkpoints
 
 # Project specific
-.env.local
 .env.development.local
 .env.test.local
 .env.production.local
+config.bat

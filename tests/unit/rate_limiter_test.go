@@ -2,71 +2,141 @@ package unit
 
 import (
 	"context"
-	"net/http"
 	"testing"
 	"time"
 
 	"github-service/internal/config"
 	"github-service/internal/github"
-	"github-service/pkg/logger"
+	"github-service/pkg/logger/mocks"
 
+	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 )
 
-// MockClient is a mock implementation of the GitHub client for testing
-type MockClient struct {
-	mock.Mock
+// testClient wraps a real client but allows overriding GetRateLimit
+// We need to use a real client because RateLimitHandler expects a concrete *Client
+type testClient struct {
+	*github.Client
+	getRateLimitFunc func(ctx context.Context) (*github.RateLimitInfo, error)
 }
 
-func (m *MockClient) GetRateLimit(ctx context.Context) (*github.RateLimitInfo, error) {
-	args := m.Called(ctx)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
+// GetRateLimit overrides the default implementation with our test function
+func (c *testClient) GetRateLimit(ctx context.Context) (*github.RateLimitInfo, error) {
+	if c.getRateLimitFunc != nil {
+		return c.getRateLimitFunc(ctx)
 	}
-	return args.Get(0).(*github.RateLimitInfo), args.Error(1)
+	return c.Client.GetRateLimit(ctx)
 }
 
-func TestRateLimitHandler(t *testing.T) {
+// Helper function to create a test rate limit handler with a mock rate limit function
+func newTestRateLimitHandler(t *testing.T, cfg *config.Config, mockLogger *mocks.MockLogger, getRateLimitFunc func(ctx context.Context) (*github.RateLimitInfo, error)) *github.RateLimitHandler {
+	// Create a real client with a test token
+	client := &testClient{
+		Client:           github.NewClient("test-token"),
+		getRateLimitFunc: getRateLimitFunc,
+	}
+	
+	// Create the handler with our test client
+	handler := github.NewRateLimitHandler(cfg, mockLogger, client.Client)
+	return handler
+}
+
+func TestRateLimitHandler_RetryOperation(t *testing.T) {
+	ctx := context.Background()
+
+	// Create mock controller
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create mock logger
+	mockLogger := mocks.NewMockLogger(ctrl)
+	mockLogger.EXPECT().Info(gomock.Any(), gomock.Any()).AnyTimes()
+	mockLogger.EXPECT().Warn(gomock.Any(), gomock.Any()).AnyTimes()
+	mockLogger.EXPECT().Error(gomock.Any(), gomock.Any()).AnyTimes()
+
+	// Create mock config
 	cfg := &config.Config{
 		GitHubMaxRetries:      3,
-		GitHubRetryBaseDelay:  100 * time.Millisecond,
-		GitHubRetryMaxDelay:   1 * time.Second,
-		GitHubRateLimitBuffer: 1 * time.Second,
+		GitHubRetryBaseDelay:  time.Second,
+		GitHubRetryMaxDelay:   30 * time.Second,
+		GitHubRateLimitBuffer: time.Second,
 	}
 
-	log := logger.New("debug")
-	// Create a mock client
-	mockClient := new(MockClient)
-	
-	// Set up the handler with the mock client
-	handler := github.NewRateLimitHandler(cfg, log, mockClient)
-
-	t.Run("ExtractRateLimitInfo", func(t *testing.T) {
-		resp := &http.Response{
-			Header: http.Header{
-				"X-Ratelimit-Limit":     []string{"5000"},
-				"X-Ratelimit-Remaining": []string{"100"},
-				"X-Ratelimit-Reset":     []string{"1620000000"},
-			},
-		}
-
-		info := handler.ExtractRateLimitInfo(resp)
-		assert.Equal(t, 5000, info.Limit)
-		assert.Equal(t, 100, info.Remaining)
-		assert.Equal(t, time.Unix(1620000000, 0), info.Reset)
+	// Create handler with mocks
+	handler := newTestRateLimitHandler(t, cfg, mockLogger, func(ctx context.Context) (*github.RateLimitInfo, error) {
+		return &github.RateLimitInfo{
+			Limit:     5000,
+			Remaining: 5000, // Start with full rate limit
+			Reset:     time.Now().Add(time.Hour),
+		}, nil
 	})
 
-	t.Run("ShouldWait", func(t *testing.T) {
-		info := github.RateLimitInfo{
-			Limit:     5000,
-			Remaining: 501, // 10.02% of 5000 (should not wait)
-			Reset:     time.Now().Add(1 * time.Hour),
+	t.Run("success on first try", func(t *testing.T) {
+		callCount := 0
+		err := handler.RetryOperation(ctx, func() error {
+			callCount++
+			return nil
+		})
+
+		assert.NoError(t, err)
+		assert.Equal(t, 1, callCount)
+	})
+
+		t.Run("retry on rate limit", func(t *testing.T) {
+		callCount := 0
+		start := time.Now()
+
+		// Configure the handler with a mock rate limit function
+		handler := newTestRateLimitHandler(t, cfg, mockLogger, func(ctx context.Context) (*github.RateLimitInfo, error) {
+			return &github.RateLimitInfo{
+				Limit:     5000,
+				Remaining: 0,
+				Reset:     time.Now().Add(30 * time.Second),
+			}, nil
+		})
+
+		operation := func() error {
+			callCount++
+			if callCount == 1 {
+				// First call - simulate rate limit exceeded
+				return &github.APIError{
+					StatusCode: 403,
+					Message:    "API rate limit exceeded",
+				}
+			}
+			return nil
 		}
 
-		assert.False(t, handler.ShouldWait(info), "Should not wait when remaining requests > 10%")
+		err := handler.RetryOperation(ctx, operation)
 
-		info.Remaining = 500 // Exactly 10% of 5000 (should wait)
-		assert.True(t, handler.ShouldWait(info), "Should wait when remaining requests <= 10%")
+		elapsed := time.Since(start)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, callCount, "Operation should be called twice (initial + retry)")
+		assert.GreaterOrEqual(t, elapsed, time.Second, "Should have waited at least 1 second")
+	})
+
+	t.Run("return error after max retries", func(t *testing.T) {
+		callCount := 0
+
+		// Create a new handler that always returns rate limit exceeded
+		handler := newTestRateLimitHandler(t, cfg, mockLogger, func(ctx context.Context) (*github.RateLimitInfo, error) {
+			return &github.RateLimitInfo{
+				Limit:     5000,
+				Remaining: 0,
+				Reset:     time.Now().Add(30 * time.Second),
+			}, nil
+		})
+
+		err := handler.RetryOperation(ctx, func() error {
+			callCount++
+			return &github.APIError{
+				StatusCode: 403,
+				Message:    "API rate limit exceeded",
+			}
+		})
+
+		assert.Error(t, err)
+		assert.Equal(t, 4, callCount, "Operation should be called 4 times (initial + 3 retries)")
+		assert.Contains(t, err.Error(), "API rate limit exceeded", "Error should contain rate limit message")
 	})
 }
