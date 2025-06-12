@@ -36,6 +36,11 @@ func NewClient(token string) *Client {
 	}
 }
 
+// SetBaseURL sets the base URL for the GitHub API
+func (c *Client) SetBaseURL(url string) {
+	c.baseURL = url
+}
+
 // get makes a GET request to the GitHub API
 func (c *Client) get(ctx context.Context, url string, result interface{}) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -85,13 +90,13 @@ func (c *Client) get(ctx context.Context, url string, result interface{}) error 
 // GetRepository gets a repository from GitHub
 func (c *Client) GetRepository(ctx context.Context, owner, repo string) (*models.Repository, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s", c.baseURL, owner, repo)
-	
+
 	var result models.Repository
 	err := c.get(ctx, url, &result)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &result, nil
 }
 
@@ -141,7 +146,7 @@ func (c *Client) ParseRepositoryResponse(resp *http.Response) (*models.Repositor
 }
 
 func (c *Client) GetCommits(ctx context.Context, owner, repo string, since *time.Time, page, perPage int) ([]*models.GitHubCommit, error) {
-	
+
 	u, err := url.Parse(fmt.Sprintf("%s/repos/%s/%s/commits", c.baseURL, owner, repo))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse URL: %w", err)

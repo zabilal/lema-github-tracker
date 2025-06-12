@@ -68,10 +68,12 @@ func TestRepository_CreateRepository(t *testing.T) {
 	repo := repository.New(db, logger)
 	txManager := repository.NewTransactionManager(db, logger)
 
+	description := "Test repository"
+
 	testRepo := &models.Repository{
 		Name:            "test-repo",
 		FullName:        "owner/test-repo",
-		Description:     *stringPtr("Test repository"),
+		Description:     &description,
 		URL:             "https://github.com/owner/test-repo",
 		Language:        *stringPtr("Go"),
 		ForksCount:      10,
@@ -117,23 +119,43 @@ func TestRepository_CommitExists(t *testing.T) {
 	repo := repository.New(db, logger)
 
 	t.Run("commit exists", func(t *testing.T) {
+		// Set up transaction expectations
+		mock.ExpectBegin()
 		rows := sqlmock.NewRows([]string{"count"}).AddRow(1)
 		mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM commits WHERE repository_id = \\$1 AND sha = \\$2").
 			WithArgs(1, "abc123").
 			WillReturnRows(rows)
+		mock.ExpectCommit()
 
-		exists, err := repo.CommitExists(1, "abc123")
+		txManager := repository.NewTransactionManager(db, logger)
+		exists := false
+		err = txManager.WithTransaction(context.Background(), "test_commit_exists", func(tx repository.Transaction) error {
+			exists, err = repo.CommitExists(tx, 1, "abc123")
+			require.NoError(t, err)
+			assert.True(t, exists)
+			return nil
+		})
 		require.NoError(t, err)
 		assert.True(t, exists)
 	})
 
 	t.Run("commit does not exist", func(t *testing.T) {
+		// Set up transaction expectations
+		mock.ExpectBegin()
 		rows := sqlmock.NewRows([]string{"count"}).AddRow(0)
 		mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM commits WHERE repository_id = \\$1 AND sha = \\$2").
 			WithArgs(1, "def456").
 			WillReturnRows(rows)
+		mock.ExpectCommit()
 
-		exists, err := repo.CommitExists(1, "def456")
+		txManager := repository.NewTransactionManager(db, logger)
+		exists := false
+		err = txManager.WithTransaction(context.Background(), "test_commit_exists", func(tx repository.Transaction) error {
+			exists, err = repo.CommitExists(tx, 1, "def456")
+			require.NoError(t, err)
+			assert.False(t, exists)
+			return nil
+		})
 		require.NoError(t, err)
 		assert.False(t, exists)
 	})
